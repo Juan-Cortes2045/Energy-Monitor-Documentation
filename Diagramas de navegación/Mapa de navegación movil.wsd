@@ -1,0 +1,94 @@
+title EnergyMonitor — Mapa de navegación (Móvil)
+
+note over Usuario,API: App Expo SDK 57 / React Native 0.86 (expo-router), solo Android.\nNavegación por menú desplegable (Sidebar tipo drawer). Emulador: backend en 10.0.2.2.\nTras iniciar sesión se accede a Inicio (/dashboard).
+
+participant Usuario
+participant "Acceso\n(/, /register, /verify-account,\n/recover-password)" as Acceso
+participant "AuthGate" as Guard
+participant "Inicio\n(/dashboard)" as Inicio
+participant "Hogares\n(/home/[id])" as Hogares
+participant "Favoritos\n(/favorites)" as Fav
+participant "Notificaciones\n(/notifications)" as Notif
+participant "Ajustes\n(/settings)" as Ajustes
+participant "Mi cuenta\n(/account)" as Cuenta
+participant "API\n/api/v1" as API
+
+== Acceso (público) ==
+Usuario->Acceso: Iniciar sesión (/)
+Acceso->API: POST /auth/login
+alt Credenciales válidas
+    API-->Acceso: access token JWT RS256 (15 min) + refresh token
+    Acceso->Inicio: router.replace("/dashboard")
+else Credenciales inválidas
+    API-->Acceso: 401 Unauthorized
+    Acceso-->Usuario: Mensaje de error, permanece en /
+end
+Usuario->Acceso: Registrarse (/register)
+Acceso->API: POST /auth/register
+Acceso->Acceso: Verificar cuenta (/verify-account)
+Acceso->API: POST /auth/email/verify
+Acceso-->Usuario: Vuelve a / (emailVerified=1)
+Usuario->Acceso: Recuperar contraseña (/recover-password)
+Acceso->API: POST /auth/password/forgot
+Acceso->Acceso: /verify-recover-password
+Acceso->Acceso: /new-password
+Acceso->API: POST /auth/password/reset
+Acceso-->Usuario: Vuelve a / (success=passwordUpdated)
+note right of Acceso: Corrección: el botón "Registrarse con Google"\nexiste en la pantalla de registro, pero está pendiente\nde implementar (solo console.log); por eso no\nse muestra como flujo activo en móvil.
+
+== Negación: acceso sin sesión ==
+Usuario->Guard: Abrir ruta privada
+alt isAuthenticated
+    Guard->Inicio: children
+else Sin sesión o sesión caducada
+    Guard-->Acceso: router.replace("/")
+    note right of Guard: Rutas públicas: /, /register, /recover-password,\n/verify-account, /verify-recover-password, /new-password.\nonSessionExpired() también redirige a /.
+end
+
+== Inicio ==
+Usuario->Inicio: Lista de hogares
+Inicio->API: GET /homes
+Usuario->Inicio: Crear hogar (CreateHomeModal)
+Inicio->API: POST /homes
+Usuario->Inicio: Unirse a hogar (JoinHomeModal)
+Inicio->API: POST /homes/join
+Inicio->Hogares: Abrir /home/[id]
+
+== Hogares (BottomTabBar) ==
+Usuario->Hogares: Abrir detalle del hogar
+Hogares-->Usuario: Pestañas: Consumo (por defecto), Historial,\nUsuarios, Dispositivos, Umbrales, Hogar
+note over Hogares: isOwner = (home.role == "OWNER").\nPantallas SOLO PROPIETARIO (en rojo en el original):\nUsuarios, Dispositivos, Umbrales y Hogar (acciones de edición).
+
+== Negación: miembro sin rol OWNER ==
+Usuario->Hogares: Dispositivos / Umbrales / Usuarios / Hogar
+alt isOwner = true
+    Hogares->API: DELETE /homes/{id}/members/{userId}\nPUT|DELETE /homes/{id}/devices/{deviceId}\nPOST /homes/{id}/thresholds/defaults
+    API-->Hogares: 2xx
+else isOwner = false (MEMBER)
+    Hogares-->Usuario: Solo lectura (ej. empty.subtitleReadOnly), acciones ocultas
+    Hogares-x API: Si se forza la petición: 403 Forbidden
+end
+
+== Favoritos ==
+Usuario->Fav: Dispositivos favoritos
+Fav->API: PUT /homes/{homeId}/favorite
+
+== Notificaciones ==
+Usuario->Notif: Pestañas: Todas / Alertas / Recomendaciones
+Notif->API: GET alertas y recomendaciones
+note right of Notif: Eventos internos de Spring (AlertRaised,\nRecommendationCreated → Notification), no Kafka.
+
+== Ajustes ==
+Usuario->Ajustes: Idioma
+Usuario->Ajustes: Temas (colores)
+Usuario->Ajustes: Notificaciones
+note right of Ajustes: Incluye también el Centro de ayuda.
+
+== Mi cuenta ==
+Usuario->Cuenta: Editar perfil (EditProfileModal)
+Cuenta->API: PUT /auth/profile
+Usuario->Cuenta: Cambiar contraseña (ChangePasswordModal)
+Cuenta->API: POST /auth/password/change
+Usuario->Cuenta: Cerrar sesión (menú del Sidebar)
+Cuenta->API: POST /auth/logout
+Cuenta-->Acceso: router.replace("/")

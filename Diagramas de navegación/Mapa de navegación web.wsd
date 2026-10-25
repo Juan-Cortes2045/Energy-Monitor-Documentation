@@ -1,0 +1,104 @@
+title EnergyMonitor — Mapa de navegación (Web)
+
+note over Usuario,API: Web React 19 + Vite 8 (react-router). Navegación por barra lateral (MainLayout).\nTras iniciar sesión se accede a Inicio (/dashboard). REST bajo /api/v1.
+
+participant Usuario
+participant "Acceso\n(/login, /register,\n/VerifyAccount, /recover-password)" as Acceso
+participant "ProtectedRoute\n+ MainLayout" as Guard
+participant "Inicio\n(/dashboard)" as Inicio
+participant "Hogares\n(/homes/:homeId)" as Hogares
+participant "Favoritos\n(/favorites)" as Fav
+participant "Notificaciones\n(/notifications)" as Notif
+participant "Ajustes\n(/settings)" as Ajustes
+participant "Mi cuenta\n(/account)" as Cuenta
+participant "API\n/api/v1" as API
+
+== Acceso (público) ==
+Usuario->Acceso: Abrir /login
+Usuario->Acceso: Registrarse (/register)
+Acceso->API: POST /auth/register
+Acceso->Acceso: Verificar cuenta (/VerifyAccount)
+Acceso->API: POST /auth/email/verify
+Usuario->Acceso: Registrarse con Google
+Acceso->API: POST /auth/google
+Usuario->Acceso: Recuperar contraseña (/recover-password)
+Acceso->API: POST /auth/password/forgot
+Acceso->Acceso: /VerifyRecoverPassword
+Acceso->API: POST /auth/password/reset
+Acceso-->Usuario: /login (aviso "passwordReset")
+note right of Acceso: Corrección: en web no existe la pantalla\n"Nueva contraseña"; el restablecimiento ocurre\nen /VerifyRecoverPassword.
+
+Usuario->Acceso: Iniciar sesión
+Acceso->API: POST /auth/login
+alt Credenciales válidas
+    API-->Acceso: access token JWT RS256 (15 min) + refresh token
+    note right of Acceso: Tokens en localStorage.
+    Acceso->Inicio: navigate("/dashboard")
+else Credenciales inválidas
+    API-->Acceso: 401 Unauthorized
+    Acceso-->Usuario: Mensaje de error, permanece en /login
+end
+
+== Negación: acceso sin sesión ==
+Usuario->Guard: Abrir ruta privada (/dashboard, /homes/:id, /favorites,\n/notifications, /settings)
+alt Sesión activa
+    Guard->Inicio: Outlet
+else Sin sesión o sesión caducada
+    Guard-->Acceso: <Navigate to="/login" replace>
+    note right of Guard: Refresh token con rotación; si la reutilización\nes detectada o expira, se redirige al login.
+end
+
+== Inicio ==
+Usuario->Inicio: Ver lista de hogares
+Inicio->API: GET /homes
+Usuario->Inicio: Crear hogar
+Inicio->API: POST /homes
+Usuario->Inicio: Unirse a hogar
+Inicio->API: POST /homes/join
+Inicio->Hogares: Abrir /homes/:homeId
+
+== Hogares (detalle con pestañas) ==
+Usuario->Hogares: Abrir /homes/:homeId
+alt homeId pertenece al usuario
+    Hogares-->Usuario: Pestañas: Consumo (por defecto), Historial,\nUsuarios, Dispositivos, Umbrales, Hogar
+else homeId inexistente o ajeno
+    Hogares-->Usuario: Pantalla "Hogar no encontrado"\n+ botón volver a /dashboard
+end
+note over Hogares: HomeRoute entrega isOwner = (home.role == "OWNER").\nPantallas SOLO PROPIETARIO (en rojo en el original):\nUsuarios (remover), Dispositivos (vincular/editar/eliminar),\nUmbrales (editar), Hogar (editar/eliminar).
+
+== Negación: miembro sin rol OWNER ==
+Usuario->Hogares: Pestaña Dispositivos / Umbrales / Usuarios / Hogar
+alt isOwner = true
+    Hogares->API: DELETE /homes/{id}/members/{userId}\nPUT|DELETE /homes/{id}/devices/{deviceId}\nPOST /homes/{id}/thresholds/defaults
+    API-->Hogares: 2xx
+else isOwner = false (MEMBER)
+    Hogares-->Usuario: Vista de solo lectura, acciones ocultas
+    Hogares-x API: Si se forza la petición: 403 Forbidden
+end
+
+== Favoritos ==
+Usuario->Fav: Dispositivos favoritos
+Fav->API: PUT /homes/{homeId}/favorite
+
+== Notificaciones ==
+Usuario->Notif: Alertas
+Notif->API: GET alertas (módulo alert)
+Usuario->Notif: Recomendaciones
+Notif->API: GET recomendaciones (módulo recommendation)
+note right of Notif: Alertas y Recomendaciones llegan por eventos internos\nde Spring (AlertRaised, RecommendationCreated →\nNotification), no por Kafka.
+
+== Ajustes ==
+Usuario->Ajustes: Idioma
+Usuario->Ajustes: Temas (colores)
+Usuario->Ajustes: Notificaciones (Web Push)
+note right of Ajustes: Incluye también el Centro de ayuda.
+
+== Mi cuenta ==
+Usuario->Cuenta: Editar perfil
+Cuenta->API: PUT /auth/profile
+Usuario->Cuenta: Cambiar contraseña
+Cuenta->API: POST /auth/password/change
+Usuario->Cuenta: Cerrar sesión
+Cuenta->API: POST /auth/logout
+Cuenta-->Acceso: Sesión eliminada, vuelve a /login
+note right of Cuenta: Corrección: /account está declarada fuera de\nProtectedRoute en AppRoutes.jsx (sin guard).
